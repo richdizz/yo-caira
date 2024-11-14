@@ -12,8 +12,8 @@ The following are pre-requisites to run yo caira.
 # What the generator does
 The yo caira Yeoman generator does the following things:
 1. Dynamically generates local terraform that points to a full reference architecture terraform
-2. Initializes and runs the terraform (found HERE)
-3. Copies a sample project template to the local drive (found HERE)
+2. Initializes and runs the terraform (found [HERE](https://github.com/richdizz/yo-test-terraform))
+3. Copies a sample project template to the local drive (found [HERE](https://github.com/richdizz/yo-test-api))
 4. Dynamically manipulates the local project, including updating existing files and creating new files (such as deploy.sh)
 5. Runs npm install on the local project
 
