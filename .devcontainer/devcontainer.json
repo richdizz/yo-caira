@@ -3,16 +3,6 @@
     "build": {
         "dockerfile": "Dockerfile"
     },
-    "customizations": {
-        "vscode": {
-            "extensions": [
-                "dbaeumer.vscode-eslint",
-                "esbenp.prettier-vscode"
-            ]
-        }
-    },
-    "forwardPorts": [3000],
-    "settings": {
-        "terminal.integrated.defaultProfile.linux": "bash"
-    }
-}  
+    "settings": {},
+    "extensions": []
+}
