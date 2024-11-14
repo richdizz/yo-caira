@@ -1,0 +1,30 @@
+{
+  "name": "generator-caira",
+  "version": "1.0.0",
+  "description": "Yeoman generator for CAIRA",
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build"
+  },
+  "files": [
+    "generators"
+  ],
+  "keywords": [
+    "yeoman-generator"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "download-git-repo": "^3.0.2",
+    "yeoman-generator": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/yeoman-generator": "^5.2.14",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3"
+  },
+  "yeoman-generator": {
+    "namespace": "caira"
+  }
+}
