@@ -14,7 +14,7 @@ export function initTerraform() {
 export function planTerraform() {
   try {
     // Plan Terraform, assuming `main.tf` is in your directory
-    execSync(`terraform plan -var-file="terraform.tfvars`, { stdio: "inherit" });
+    execSync(`terraform plan -var-file="terraform.tfvars"`, { stdio: "inherit" });
   } catch (error) {
     console.error("Error running Terraform:", error);
   }

@@ -11,6 +11,7 @@ interface PromptAnswers {
   personalAccessToken: string;
   referenceArchitecture: string;
   projectName: string;
+  location: string;
   customDomainName: string;
   certificatePath: string;
   certificatePassword: string;
@@ -60,7 +61,7 @@ class CairaGenerator extends Generator {
     // We could look for RAs with a yo.json in root, which would include config for the RA with yeoman
 
     // Prompt user for input
-    this.promptAnswers = await this.prompt([
+    const secondPromptAnswers = await this.prompt([
       {
         type: "list",
         name: "referenceArchitecture",
@@ -72,6 +73,25 @@ class CairaGenerator extends Generator {
         name: "projectName",
         message: chalk.reset.blue("What is your project name?"),
         default: "my-project"
+      },
+      {
+        type: "list",
+        name: "location",
+        message: chalk.reset.blue("Please select an Azure region:"),
+        choices: [
+          "eastus",
+          "eastus2",
+          "westus",
+          "centralus",
+          "northeurope",
+          "westeurope",
+          "southeastasia",
+          "eastasia",
+          "australiaeast",
+          "uksouth",
+          "canadacentral",
+          "southafricanorth"
+        ]
       },
       {
         type: "input",
@@ -91,6 +111,14 @@ class CairaGenerator extends Generator {
         message: chalk.reset.blue("What is password of the certificate?"),
       }
     ]);
+
+    // Merge secondPromptAnswers into this.promptAnswers
+    this.promptAnswers = {
+      ...this.promptAnswers,
+      ...secondPromptAnswers
+    };
+
+    console.log(this.promptAnswers);
   };
 
   // 2. Configure the project
@@ -104,8 +132,8 @@ class CairaGenerator extends Generator {
 
     // TODO: add additional variables
     // generate TF file locally that uses GitHub as a Terraform Module Source
-    await writeTextFile(process.cwd(), "terraform.tfvars", `environment = \"${this.promptAnswers.projectName}\"`)
-    await writeTextFile(process.cwd(), "main.tf", `module \"remote_caira\" { \nsource = \"git::https://${this.promptAnswers.personalAccessToken}@github.com/microsoft/CAIRA.git//reference_architectures/secure_teams_copilot?ref=sandervd/greenThread_2\" \nenvironment = var.environment \n}\n\nvariable "environment" {}`)
+    await writeTextFile(process.cwd(), "terraform.tfvars", `environment = \"${this.promptAnswers.projectName}\"\nlocation = \"${this.promptAnswers.location}\"`);
+    await writeTextFile(process.cwd(), "main.tf", `module \"remote_caira\" { \n    source = \"git::https://${this.promptAnswers.personalAccessToken}@github.com/microsoft/CAIRA.git//reference_architectures/secure_teams_copilot?ref=sandervd/greenThread_2\" \n    environment = var.environment \n    location = var.location\n}\n\nvariable \"environment\" {}\nvariable \"location\" {}`)
 
     // init and plan terraform
     this.log("Initializing Terraform...");
