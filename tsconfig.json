@@ -2,9 +2,9 @@
   "compilerOptions": {
     "outDir": "generators",
     "rootDir": "src",
-    "module": "CommonJS",
+    "module": "NodeNext", // Set to NodeNext for ES module support
+    "moduleResolution": "NodeNext", // Must match 'module'
     "target": "ES2020",
-    "moduleResolution": "node",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

@@ -1,134 +1,189 @@
 import Generator from "yeoman-generator";
+import { ensureAzureLoginAndSubscription } from "../utils/azure";
+import { writeTextFile } from "../utils/file";
 const download = require("download-git-repo");
-import { execSync } from "child_process";
+import { initTerraform, planTerraform, applyTerraform, getTerraformOutput } from "../utils/terraform";
 import * as path from "path";
 import * as fs from "fs";
-import { runTerraform, getTerraformOutput } from "./terraform";
-import { Console } from "console";
+import { execSync } from "child_process";
 
 interface PromptAnswers {
+  personalAccessToken: string;
   referenceArchitecture: string;
   projectName: string;
+  customDomainName: string;
+  certificatePath: string;
+  certificatePassword: string;
+  // TODO: make this dynamic based on the RA configuration
 }
 
-interface HumanWorkflowCheckpoints {
+interface ConfigureAnswers {
+  performApply: boolean;
   domainStuffComplete: boolean;
 }
 
 class CairaGenerator extends Generator {
-  answers!: PromptAnswers;
-  humanWorkflow!: HumanWorkflowCheckpoints;
+  promptAnswers!: PromptAnswers;
+  configAnswers!: ConfigureAnswers;
   private terraformOutput: Record<string, any> = {};
   constructor(args: string | string[], options: {}) {
     super(args, options);
   };
 
-  // utility function to write text files
-  writeTextFile = async (destinationPath: string, fileName: string, content: string) => {
-    const filePath = path.join(destinationPath, fileName);
-    await fs.writeFileSync(filePath, content, "utf8");
-  };
-
-  // utility function to ensure Azure login and subscription
-  ensureAzureLoginAndSubscription = async () => {
-    try {
-      // Check if logged in and retrieve subscriptions
-      const subscriptionsOutput = execSync("az account list --query '[].id' -o tsv", { encoding: "utf8" });
-      const subscriptions = subscriptionsOutput.trim().split("\n");
-  
-      if (subscriptions.length === 0) {
-        // No subscriptions available, ask user to login
-        console.log("No Azure subscriptions found. Please log in to Azure.");
-        execSync("az login", { stdio: "inherit" });
-      }
-  
-      // Check if a subscription is set
-      let currentSubscription = execSync("az account show --query 'id' -o tsv", { encoding: "utf8" }).trim();
-      if (!currentSubscription) {
-        // Prompt user to select a subscription if not set
-        const { subscriptionId } = await this.prompt([
-          {
-            type: "list",
-            name: "subscriptionId",
-            message: "Select an Azure subscription:",
-            choices: subscriptions,
-          },
-        ]);
-  
-        // Set the selected subscription
-        execSync(`az account set --subscription ${subscriptionId}`);
-        currentSubscription = subscriptionId;
-      }
-  
-      return currentSubscription;
-    } catch (error) {
-      console.error("Error ensuring Azure login and subscription:", error);
-      throw error;
-    }
-  }
-
   // 1. Prompt the user for the reference architecture and project name
   async prompting() {
-    this.log("Welcome to the CAIRA Yeoman Generator!");
+    const chalk = (await import("chalk")).default;
+
+    // Prompt welcome message
+    this.log("");
+    this.log(chalk.blue("----------------------------------------"));
+    this.log(chalk.blue("Welcome to the CAIRA Yeoman Generator!"));
+    this.log(chalk.blue("----------------------------------------"));
+
+    // Prompt PAT warning
+    this.log("");
+    this.log(chalk.red("!!! The CAIRA repository is currently set to private. A personal access token (PAT) with access to CAIRA is required to use this generator"));
+    this.log("");
+
+    // Prompt for personalAccessToken
+    this.promptAnswers = await this.prompt([
+      {
+        type: "password",
+        name: "personalAccessToken",
+        message: chalk.reset.blue("What is your PAT with CAIRA access?")
+      }
+    ]);
+
+    // TODO: test the PAT to ensure it has access to the CAIRA repo
 
     // TODO: dynamically query available reference architectures
+    // We could look for RAs with a yo.json in root, which would include config for the RA with yeoman
 
-    // Ask which reference architecture to use
-    this.answers = await this.prompt([
+    // Prompt user for input
+    this.promptAnswers = await this.prompt([
       {
         type: "list",
         name: "referenceArchitecture",
-        message: "Please select a CAIRA Reference Architecture:",
+        message: chalk.reset.blue("Please select a CAIRA Reference Architecture:"),
         choices: ["SecureAML", "Secure Teams CoPilot"],
       },
-    ]);
-
-    // Ask for project name
-    this.answers = await this.prompt([
       {
         type: "input",
         name: "projectName",
-        message: "What is your project name?",
+        message: chalk.reset.blue("What is your project name?"),
         default: "my-project"
+      },
+      {
+        type: "input",
+        name: "customDomainName",
+        message: chalk.reset.blue("What is domainname for your project?"),
+        default: "bot.contoso.com"
+      },
+      {
+        type: "input",
+        name: "certificatePath",
+        message: chalk.reset.blue("What is path to the certificate for app service?"),
+        default: "~/repos/certs/cert.pfx"
+      },
+      {
+        type: "password",
+        name: "certificatePassword",
+        message: chalk.reset.blue("What is password of the certificate?"),
       }
     ]);
   };
 
   // 2. Configure the project
   async configuring() {
+    const chalk = (await import("chalk")).default;
+
     // ensure Azure login and subscription
     this.log("Checking Azure subscription...");
-    const subscriptionId = await this.ensureAzureLoginAndSubscription();
-    console.log("Subscription ID:", subscriptionId);
+    const subscriptionId = await ensureAzureLoginAndSubscription(this);
+    this.log("Subscription ID:", subscriptionId);
 
+    // TODO: add additional variables
     // generate TF file locally that uses GitHub as a Terraform Module Source
-    await this.writeTextFile(process.cwd(), "terraform.tfvars", `subscription_id = \"${subscriptionId}\"\nprefix = \"${this.answers.projectName}\"`)
-    await this.writeTextFile(process.cwd(), "main.tf", `module \"remote_caira\" { \nsource = \"github.com/richdizz/yo-test-terraform\" \nsubscription_id = var.subscription_id \nprefix = var.prefix \n}\n\nvariable "subscription_id" {}\nvariable "prefix" {}`)
+    await writeTextFile(process.cwd(), "terraform.tfvars", `environment = \"${this.promptAnswers.projectName}\"`)
+    await writeTextFile(process.cwd(), "main.tf", `module \"remote_caira\" { \nsource = \"git::https://${this.promptAnswers.personalAccessToken}@github.com/microsoft/CAIRA.git//reference_architectures/secure_teams_copilot?ref=sandervd/greenThread_2\" \nenvironment = var.environment \n}\n\nvariable "environment" {}`)
 
-    console.log("Terraform written");
+    // init and plan terraform
+    this.log("Initializing Terraform...");
+    initTerraform();
+    this.log("Planning Terraform...");
+    planTerraform();
 
-    // run the Terraform
-    runTerraform();
-
-    // capture and log the Terraform output
-    this.terraformOutput = getTerraformOutput();
-    console.log(this.terraformOutput);
-
-    // Prompt the user to do custom domain stuff
-    this.humanWorkflow = await this.prompt([
+    // Prompt the user to confirm the plan
+    this.configAnswers = await this.prompt([
       {
         type: "confirm",
-        name: "domainStuffComplete",
-        message: "The Terraform process completed. Here we could pause for user to complete custom domain stuff now. Are you done?"
-      },
+        name: "performApply",
+        message: chalk.reset.blue("Please review the Terraform plan. Do you want to apply it?")
+      }
     ]);
+
+    // only contine if user confirmed to apply
+    if (this.configAnswers.performApply) {
+      // apply the terraform
+      applyTerraform();
+
+      // capture and log the Terraform output
+      this.terraformOutput = getTerraformOutput();
+      this.log(this.terraformOutput);
+
+      // Get the verification Id for the custom domain
+      const verificationId = execSync(`az webapp show --resource-group ${this.terraformOutput.resource_group_name.value} --name ${this.terraformOutput.app_service_name.value} --query customDomainVerificationId --output json`, { encoding: "utf8" });
+
+      // Output domain instructions to user
+      this.log("");
+      this.log(chalk.blue("----------------------------------------"));
+      this.log(chalk.blue(`Terraform has been applied to subscription ${subscriptionId}.`));
+      this.log(chalk.blue("----------------------------------------"));
+      this.log("");
+      this.log(chalk.red(`Before continuing, you must complete the following steps:\n    - Create TXT record using verification id ${verificationId}\n    - Create A-Record with IP Address: "${this.terraformOutput.firewall_pip.value}"`));
+      this.log("");
+
+      // Prompt the user to do custom domain stuff
+      this.configAnswers = await this.prompt([
+        {
+          type: "confirm",
+          name: "domainStuffComplete",
+          message: chalk.reset.red(`Have you completed the custom domain configuration steps outlined above?`)
+        },
+      ]);
+
+      this.log("Setting the custom domain to the Bot App Service Web App ...");
+      const setCustomDomain = execSync(`az webapp config hostname add --resource-group ${this.terraformOutput.resource_group_name.value} --webapp-name ${this.terraformOutput.app_service_name.value} --hostname ${this.promptAnswers.customDomainName}`);
+
+      this.log("Uploading the certificate to the Bot App Service Web App ...");
+      const certUpload = execSync(`az webapp config ssl upload --resource-group ${this.terraformOutput.resource_group_name.value} --name ${this.terraformOutput.app_service_name.value} --certificate-file ${this.promptAnswers.certificatePath} --certificate-password ${this.promptAnswers.certificatePassword}`);
+
+      this.log("Get the thumbprint of the uploaded certificate ...");
+      const thumbprint = execSync(`az webapp config ssl list --resource-group ${this.terraformOutput.resource_group_name.value} --query "[?hostNames[0]=='${this.promptAnswers.customDomainName}"].thumbprint" --output json`, { encoding: "utf8" });
+      
+      this.log("Bind the uploaded certificate to the Bot App Service Web App ...");
+      const certBind = execSync(`az webapp config ssl bind --resource-group ${this.terraformOutput.resource_group_name.value} --name ${this.terraformOutput.app_service_name.value} --certificate-thumbprint ${JSON.parse(thumbprint)[0]} --ssl-type SNI`);
+      
+      this.log("Set the endpoint for the custom domain to azure bot service endpoint ...");
+      const botendpointchange = execSync(`az bot update --resource-group ${this.terraformOutput.resource_group_name.value} --name ${this.terraformOutput.bot_service_name.value} --endpoint https://${this.promptAnswers.customDomainName}/api/messages`, { stdio: "inherit" });
+    
+      this.log("Generating VPN client configuration for the virtual network gateway ...");
+      const vpnClientConfig = execSync(`az network vnet-gateway vpn-client generate --resource-group ${this.terraformOutput.resource_group_name.value} --name ${this.terraformOutput.vnet_gateway_name.value} --output xml`, { encoding: "utf8" });
+      const vpnClientConfigPath = path.join(__dirname, "vpnClientConfig.xml");
+      // Save the VPN client configuration to a file
+      fs.writeFileSync(vpnClientConfigPath, vpnClientConfig);
+      this.log(`VPN client configuration saved to ${vpnClientConfigPath}`);
+    }
   };
+  
 
   // 3. Write the files
   async writing() {
+    const chalk = (await import("chalk")).default;
+
     // Define GitHub repo and destination path
-    const repoUrl = "github:richdizz/yo-test-api";
-    const destination = this.destinationPath(`${process.cwd()}/${this.answers.projectName}`);//this.answers.projectName);
+    const repoUrl = "github:svandenhoven/BasicAIBot";
+    const destination = this.destinationPath(`${process.cwd()}/${this.promptAnswers.projectName}`);//this.promptAnswers.projectName);
 
     this.log("Cloning the template repository...");
 
@@ -145,37 +200,32 @@ class CairaGenerator extends Generator {
       });
     });
 
-    // Update package.json or other files in the cloned repository
+    // Update package.json with project name
     const packageJsonPath = path.join(destination, "package.json");
-
-    // Read the current contents of package.json
     let packageJson:any = {};
     if (fs.existsSync(packageJsonPath)) {
       packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
     }
-
-    // Update the package.json data
-    packageJson.name = this.answers.projectName;
-
-    // Write the modified package.json back to the file without triggering conflict detection
+    packageJson.name = this.promptAnswers.projectName;
     fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2), "utf8");
 
-    // add deployment script to project
-    await this.writeTextFile(`${process.cwd()}/${this.answers.projectName}`, "deploy.sh", `#!/bin/bash\n\n# Variables\nRESOURCE_GROUP="${this.answers.projectName}rgrichdizz"\nAPP_SERVICE_NAME="${this.answers.projectName}asrichdizz"\n\n# Login to Azure if needed\naz login\n\n# Stop the app if it’s already running\necho "Stopping the app..."\naz webapp stop --resource-group $RESOURCE_GROUP --name $APP_SERVICE_NAME\n\n# Create a zip file of the current directory\nzip -r app.zip .\n\naz webapp deploy \\\n  --resource-group $RESOURCE_GROUP \\\n  --name $APP_SERVICE_NAME \\\n  --src-path app.zip \\\n  --type zip \\\n  --clean  &\n\necho "Deployment command initiated. Waiting for deployment completion..."\n\n# Wait for deployment to finish\nwait\n\n# Clean up the zip file\nrm app.zip\n\n# Start the app to ensure it's running\necho "Starting the app..."\naz webapp start --resource-group $RESOURCE_GROUP --name $APP_SERVICE_NAME\n\necho "Deployment completed and app is running!"`);
+    // TODO: Update other files such as .env and teamsapp.yaml
   };
 
   // 4. Install dependencies
   async install() {
-    const subfolderPath = path.join(process.cwd(), this.answers.projectName);
+    const chalk = (await import("chalk")).default;
+    const subfolderPath = path.join(process.cwd(), this.promptAnswers.projectName);
     
     this.log(`Running npm install in ${subfolderPath}...`);
     // Run npm install in the copied folder
-    this.spawnCommandSync('npm', ['install'], { cwd: subfolderPath });
+    this.spawnCommandSync("npm", ["install"], { cwd: subfolderPath });
   }
 
   // 5. End
-  end() {
-    this.log("Generator finished successfully!");
+  async end() {
+    const chalk = (await import("chalk")).default;
+    this.log(chalk.blue("Generator finished successfully!"));
   };
 }
 
